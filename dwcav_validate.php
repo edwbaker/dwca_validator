@@ -83,7 +83,7 @@ function dwcav_meta_xml($dir, $ok_files) {
   }
   fclose($handle);
   
-  //Now we have all identifiers we need to through again
+  //Now we have all identifiers we need to through again TODO: (add other files into a loop here)
   $multi_terms = dwcav_terms_info();
   $handle = fopen($file_path, "r");
   $row = 1;
