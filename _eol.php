@@ -7,3 +7,9 @@ function eol_term_eol_org_schema_agent_agentID($file, $row, $value, &$core_ids, 
   	dwcav_error('error', $file, "row $row - EoL Agent ($value) does not exist in archive");
   }
 }
+
+function eol_exclusions_files_core_index() {
+	return array(
+	  'http://eol.org/schema/agent/Agent',
+	);
+}

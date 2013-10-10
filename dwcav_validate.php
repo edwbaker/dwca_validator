@@ -406,17 +406,27 @@ function dwcav_extract(&$zip, $file_name){
   return $tmp_path . $dir_listing[2] . "/";
 }
 
+/*
+ * Helper function to get list of all files that do not require a link to the core file
+ */
 function dwcav_exclusions_files_core_index() {
-	return array(
-	  'http://eol.org/schema/agent/Agent',
-	  'http://www.w3.org/ns/oa#Annotationt',
-	);
+  global $namespaces;
+  $return = array();
+  foreach ($namespaces as $namespace) {
+  	if ($namespace == 'dwcav') {
+  	  continue;
+  	}
+  	$function = $namespace."_exclusions_files_core_index";
+  	if (function_exists($function)) {
+  	  $return = array_merge($return, $function());
+  	}
+  }
+  return $return;
 }
 
 /*
  * Helper function to get list of all validations trhat require 2 or more fields
  */
-
 function dwcav_terms_info() {
   global $namespaces;
   $return = array();
