@@ -38,13 +38,13 @@ $archive_path = $argv[1];
 if (isset($argv[2])) {
 	if ($argv[2] == 'info') {
 	  $print_info = TRUE;
-	  $web = TRUE;
 	}
 }
 
 global $_GET;
 if (isset($_GET['url'])) {
   $archive_path = $_GET['url'];
+  $web = TRUE;
 }
 
 //Open and extract the archive
