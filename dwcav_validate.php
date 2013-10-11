@@ -29,6 +29,7 @@ $identifiers = array();
 $field_uris = array();
 $freetext = dwcav_terms_freetext();
 $print_info = FALSE;
+$web = FALSE;
 
 
 //Takes path to archive as a single argument from the command line
@@ -37,6 +38,7 @@ $archive_path = $argv[1];
 if (isset($argv[2])) {
 	if ($argv[2] == 'info') {
 	  $print_info = TRUE;
+	  $web = TRUE;
 	}
 }
 
@@ -468,7 +470,10 @@ function dwcav_error($level, $section, $message, $row=''){
 function dwcav_error_print() {
   global $errors;
   global $print_info;
-  print "\n\n\n";
+  global $web;
+  if (!$web){
+    print "\n\n\n";
+  }
   $section_length = 0;
   foreach($errors as $section => $data){
   	if (strlen($section) > $section_length){
@@ -489,7 +494,8 @@ function dwcav_error_print() {
   	 	print $data['rows'];
   	 	print ")";
   	 }
-  	  print "\n";
+  	 $line_ending = ($web ? "<br/>" : "\n");
+  	  print $line_ending;
   	}
   	
   }
