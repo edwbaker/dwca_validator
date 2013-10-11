@@ -3,6 +3,29 @@ $namespaces[] = 'eol';
 
 $eol_strict = FALSE;
 
+function eol_terms_info(){
+  return array(
+    'eol_terms_agent_has_name' => array(
+      'http://xmlns.com/foaf/spec/#term_familyName',
+      'http://xmlns.com/foaf/spec/#term_firstName',
+      'http://xmlns.com/foaf/spec/#term_name',
+    )
+  );
+}
+
+function eol_terms_agent_has_name($file, $row, $params){
+	$surname = trim('http://xmlns.com/foaf/spec/#term_familyName');
+	$firstname = trim('http://xmlns.com/foaf/spec/#term_firstName');
+	$term_name = trim('http://xmlns.com/foaf/spec/#term_name');
+	if ($surname == "" && $firstname == "" && term_name == "") {
+	  dwcav_error('error', $file, "agent must have one of firstName, familyName or term_name", $row);
+	  return;
+	}
+	if ($surname == "" xor $firstname == "") {
+	  dwcav_error('info', $file, "onky has one of firstName, familyName", $row);
+	}
+}
+
 function eol_terms_freetext(){
   return array(
     'http://eol.org/schema/reference/full_reference' => array('empty' => 'error'),

@@ -28,11 +28,17 @@ $errors = array(
 $identifiers = array();
 $field_uris = array();
 $freetext = dwcav_terms_freetext();
+$print_info = FALSE;
 
 
 //Takes path to archive as a single argument from the command line
 global $argv;
 $archive_path = $argv[1];
+if (isset($argv[2])) {
+	if ($argv[2] == 'info') {
+	  $print_info = TRUE;
+	}
+}
 
 //Open and extract the archive
 $dir = dwcav_extract(dwcav_openfile($archive_path), $archive_path);
@@ -401,7 +407,7 @@ function dwcav_xml_attributes($attributes, $file){
 function dwcav_archive($dir, $dir_list){ 
   //Verify that a meta.xml is present, if not it is impossible to verify the file
   if(!in_array('meta.xml', $dir_list)){
-    dwcav_error('fatal', 'archive', 'meta.xml is not present', "");
+    dwcav_error('fatal', 'archive', "meta.xml is not present at $dir", "");
   }
   
   //Generate a list of files tthat should be checked for DwC-A compliance against meta.xml
@@ -456,6 +462,7 @@ function dwcav_error($level, $section, $message, $row=''){
 
 function dwcav_error_print() {
   global $errors;
+  global $print_info;
   print "\n\n\n";
   $section_length = 0;
   foreach($errors as $section => $data){
@@ -466,6 +473,9 @@ function dwcav_error_print() {
   
   foreach ($errors as $section => $section_data){
   	foreach ($section_data as $message => $data) {
+  	 if ($data['level'] == 'info' && !$print_info) {
+  	 	continue;
+  	 }
   	 $label = str_pad($section, $section_length+2, " ", STR_PAD_BOTH);
   	 $level = str_pad($data['level'], strlen('warning')+2, " ", STR_PAD_BOTH);
   	 print "[$label] ($level) $message ";
@@ -484,6 +494,23 @@ function dwcav_error_print() {
  * Wrapper around ZipArchive to open a zip file for extraction
  */
 function dwcav_openfile($file_name){
+  if (filter_var($file_name, FILTER_VALIDATE_URL)){
+  	$tmp_path = sys_get_temp_dir() . '/'.time().'.zip';
+  	$handle = fopen($tmp_path, "w");
+  	$options = array(
+      CURLOPT_FILE    => $handle,
+      CURLOPT_TIMEOUT =>  28800, // set this to 8 hours so we dont timeout on big files
+      CURLOPT_URL     => $file_name,
+    );
+    $ch = curl_init();
+    curl_setopt_array($ch, $options);
+    curl_exec($ch);
+    fclose($handle);
+    $file_name = $tmp_path;
+  }
+  
+  	  print "$file_name\n";
+	
   $zip = new ZipArchive();
   $is_open = $zip->open($file_name);
   if($is_open === TRUE){
@@ -497,7 +524,9 @@ function dwcav_openfile($file_name){
  * Wrapper around ZipArchive to extract contents of archive
  */
 function dwcav_extract(&$zip, $file_name){
-  $tmp_path = sys_get_temp_dir() . '/dwca/';
+  $tmp_path = sys_get_temp_dir() . '/dwcav/'.time().'/';
+  array_map('unlink', glob("$tmp_path*"));
+  
   if ($zip->extractTo($tmp_path)) {
     dwcav_error('debug', 'archive', "Files extracted to $tmp_path", "");
     $zip->close();
@@ -506,7 +535,15 @@ function dwcav_extract(&$zip, $file_name){
   }
   //extractTo creates a new subfolder for files - return path to that subfolder
   $dir_listing = scandir($tmp_path);
-  return $tmp_path . $dir_listing[2] . "/";
+  $i=0;
+  $ignore = array('.', '_');
+  foreach ($dir_listing as $try) {
+  	if (!in_array(substr($try, 0, 1), $ignore)){
+  	  return $tmp_path.$dir_listing[$i].'/';
+  	}
+  	$i++;
+  }
+  return FALSE;
 }
 
 /*
