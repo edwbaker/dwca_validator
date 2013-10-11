@@ -8,6 +8,8 @@ foreach ($includes as $include) {
   require_once($include);
 }
 
+$verbose = FALSE; //Tells you all that's going on
+$debug   = FALSE;  //Like verbose, but just stuff useful for checking on the validator
 
 /*
  * DarwinCore-Archive validator
@@ -19,8 +21,13 @@ foreach ($includes as $include) {
  */
 
 //Variables we will use throughout
-$errors = array();
+$errors = array(
+  'validator' => array(),
+  'archive' => array(),
+);
 $identifiers = array();
+$field_uris = array();
+$freetext = dwcav_terms_freetext();
 
 
 //Takes path to archive as a single argument from the command line
@@ -38,7 +45,7 @@ $ok_files = dwcav_archive($dir, $dir_list);
 $core_file = dwcav_meta_xml($dir, $ok_files);
 
 if (!$core_file) {
-  dwcav_error('fatal', 'meta.xml', "No core file defined in meta.xml");
+  dwcav_error('fatal', 'meta.xml', "No core file defined in meta.xml", "");
 }
 
 
@@ -66,6 +73,7 @@ function dwcav_load_plugins() {
  * This is essential for validating the linking between different files.
  */
 function dwcav_meta_xml($dir, $ok_files){
+  global $freetext;
   //We need to be able to parse the meta file
   $meta = file_get_contents("$dir/meta.xml");
   $meta_xml = new SimpleXMLElement($meta);
@@ -75,11 +83,11 @@ function dwcav_meta_xml($dir, $ok_files){
   
   //Check for core file data - each archive must have a core file
   if(!isset($meta_xml->core)){
-    dwcav_error('error', 'meta.xml', "No core defined in meta.xml - validation stopped");
+    dwcav_error('error', 'meta.xml', "No core defined in meta.xml - validation stopped", "");
     return FALSE;
   }
   if(!isset($meta_xml->core->files->location)){
-    dwcav_error('error', 'meta.xml', "No core file is defined in the meta.xml - validation stopped");
+    dwcav_error('error', 'meta.xml', "No core file is defined in the meta.xml - validation stopped", "");
     return FALSE;
   }else{
     $present_files[] = $core_file = $meta_xml->core->files->location;
@@ -92,12 +100,15 @@ function dwcav_meta_xml($dir, $ok_files){
   $id_column = (array)$meta_xml->core->id->attributes(); //set to column number of identifier (unique)
   $id_column = $id_column['@attributes']['index'];
   $meta_columns = array();
-  $meta_columns[$id_column] = 'core';
+  $id_term = (array)$meta_xml->core;
+  $id_term = (array)$id_term['field'][0]->attributes()->term;
+  $meta_columns[$id_column] = 'https://purl.org/dc/terms/identifier';//Peculiar to our archives
+  
   foreach($meta_xml->core->field as $field){
     $field = (array)$field;
     $meta_columns[$field['@attributes']['index']] = $field['@attributes']['term'];
   }
-  $identifiers['core'] = array( //TODO: change core to rowType
+  $identifiers[$meta_columns[$id_column]] = array( //TODO: change core to rowType (actually - we don't define this in meta)
     'is_core' => TRUE,
     'file_path' => $dir . (string)$meta_xml->core->files->location,
     'file_name' => (string)$meta_xml->core->files->location,
@@ -113,13 +124,13 @@ function dwcav_meta_xml($dir, $ok_files){
   foreach($meta_xml->extension as $extension){
     dwcav_xml_attributes($extension->attributes(), $extension->files->location);
     if(!isset($extension->files->location)){
-      dwcav_error('error', 'meta.xml', "No file is defined for $extension->attributes()->rowType");
+      dwcav_error('error', 'meta.xml', "No file is defined for $extension->attributes()->rowType", "");
       continue;
     } else {
       $present_files[] = $extension->files->location;
     }
     if(!in_array($extension->files->location, $ok_files)){
-      dwcav_error('error', 'meta.xml', "The " . $extension->files->location . " file is not present in the archive"); 
+      dwcav_error('error', 'meta.xml', "The " . $extension->files->location . " file is not present in the archive". ""); 
     }
   }
   
@@ -172,17 +183,24 @@ function dwcav_meta_xml($dir, $ok_files){
               $matched_rows .= $same_id;
             }
             $i++;
-            dwcav_error('error', $rowProperties['file_name'], "row $row  has non unique identifier (same as row(s) $matched_rows)");
+            dwcav_error('error', $rowProperties['file_name'], "row $row  has non unique identifier (same as row(s) $matched_rows)", "");
           } else{
             $rowProperites['ids'][] = $data[$rowProperties['core_id_column']];
             $rowProperties['ids'][$data[$rowProperties['core_id_column']]][] = $row;
           }
         } else {
           //If this file is not core, but is linked to the core, check the identifier given exists in core
-          if (trim($data[$rowProperties['core_id_column']]) != "" && !array_key_exists($data[$rowProperties['core_id_column']], $identifiers['core']['ids'])) {
+          $core_type ='';
+          foreach ($identifiers as $id => $stuff) {
+          	if ($stuff['is_core']) {
+          	  $core_type = $id;
+          	  break;
+          	}
+          }
+          if (trim($data[$rowProperties['core_id_column']]) != "" && !array_key_exists($data[$rowProperties['core_id_column']], $identifiers[$core_type]['ids'])) {
             //Some files are expected to break this rule, even if it is not strictly valid
           	if(!in_array($rowType, dwcav_exclusions_files_core_index())) {
-          	  dwcav_error('error', $rowProperties['file_name'], "row $row - identifier not in core file");
+          	  dwcav_error('error', $rowProperties['file_name'], "identifier not in core file", $row);
           	}
           }
           //Duplicate IDs in extensions isn't so bad - but give an info just in case
@@ -196,7 +214,7 @@ function dwcav_meta_xml($dir, $ok_files){
               $matched_rows .= $same_id;
             }
             $i++;
-            dwcav_error('info', $rowProperties['file_name'], "row $row  has non unique identifier (same as row(s) $matched_rows)");
+            dwcav_error('info', $rowProperties['file_name'], "row $row  has non unique identifier (same as row(s) $matched_rows)", "");
           } else{
             $rowProperites['ids'][] = $data[$rowProperties['id_column']];
             $rowProperties['ids'][$data[$rowProperties['id_column']]][] = $row;
@@ -206,7 +224,7 @@ function dwcav_meta_xml($dir, $ok_files){
         $row++;
       }
     } else {
-      dwcav_error('error', $rowProperties['file_name'], "Could not open file");
+      dwcav_error('error', $rowProperties['file_name'], "Could not open file", "");
     }
     fclose($handle);
   }
@@ -215,30 +233,35 @@ function dwcav_meta_xml($dir, $ok_files){
   // - now we must validate the fields. Most checks only need the type of field and the value to check
   // but checks require access to multiple columns, let's get an array of these
   $multi_terms = dwcav_terms_info();
+  $free_text = dwcav_terms_freetext();
   
   //As we use rowTypes from the meta.xml here it is possible that we will parse a single file multiple times
+  global $field_uris;
   foreach($identifiers as $rowType => &$rowProperties){
     $handle = fopen($rowProperties['file_path'], "r");
     $row = 1;
     if($handle !== FALSE){
     	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'], $rowProperties['field_enclosed'])) !== FALSE){
         foreach($rowProperties['columns'] as $index => $term){
-          //Start with a generic check
-          dwcav_term($rowProperties['file_name'], $row, $data[$index], $rowProperties['ids'], $term);
+          if (!array_key_exists($term, $field_uris)) {
+          	$field_uris[$term] = array();
+          }
+          //Start with a generic check - this also performs validation on freetext
+          //print $data[$index]."\n";
+          dwcav_term($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $term);
           
           //$safe_term turns a term URI into a string suitable as a name for a PHP function
-          $safe_term = substr($term, 7);
-          $safe_term = str_replace('.', '_', $safe_term);
-          $safe_term = str_replace('/', '_', $safe_term);
+          $safe_term = dwcav_safe_term($term);
           
           //Check whether any function provides further validation
           global $namespaces;
           foreach ($namespaces as $namespace) {
             $function = $namespace.'_term_' . $safe_term;
             if(function_exists($function)){
-              $function($rowProperties['file_name'], $row, $data[$index], $rowProperties['ids'], $identifiers);
+              $function($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $identifiers);
             }
           }
+          
           
           //check for multi-field checks
           foreach($multi_terms as $function => $terms){
@@ -262,7 +285,7 @@ function dwcav_meta_xml($dir, $ok_files){
         $row++;
       }
     }else{
-      dwcav_error('error', $rowProperties['file_name'], "Could not open file");
+      dwcav_error('error', $rowProperties['file_name'], "Could not open file", "");
     }
     fclose($handle);
     
@@ -271,15 +294,66 @@ function dwcav_meta_xml($dir, $ok_files){
   //are there files not listed in the meta file?
   foreach($ok_files as $ok_file){
     if(!in_array($ok_file, $present_files)){
-      dwcav_error('error', 'Archive', "$ok_file is in the archive but not listed in the meta.xml");
+      dwcav_error('error', 'Archive', "$ok_file is in the archive but not listed in the meta.xml", "");
     }
   }
+  
+  //What have we validated?
+  foreach ($field_uris as $field_uri => &$data) {
+    foreach ($namespaces as $namespace) {
+      $function = $namespace."_term_".dwcav_safe_term($field_uri);
+      if (function_exists($function)) {
+      	$field_uris[$field_uri] = array('standard' => $namespace);
+      }
+      if (array_key_exists($field_uri, $free_text)) {
+      	$field_uris[$field_uri] = array('freetext' => '');
+      }
+    }
+  }
+  global $verbose;
+  global $debug;
+  $deprecated = dwcav_terms_deprecated();
+  foreach ($field_uris as $field_uri => $data) {
+  	if (in_array($field_uri, $deprecated)) {
+  	  dwcav_error('info', 'archive', "$field_uri appears to be deprecated", "");
+  	}
+  }
+  if ($verbose || $debug) {
+  foreach ($field_uris as $field_uri => $data) {
+  	$validated = FALSE;
+      if (isset($data['standard'])) {
+        if ($verbose) {
+          print "$field_uri is validated by ".$data['standard']."\n";
+        }
+      	$validated = TRUE;
+      }
+      if (isset($data['freetext'])) {
+        if ($verbose) {
+          print "$field_uri is freetext so only has basic validation\n";
+        }
+          $validated = TRUE;
+        }
+      if (!$validated) {
+        dwcav_error('info', 'validator', "$field_uri has no validation function available", "");
+      }
+    }
+  }
+  
+
+  
   return $core_file;
 }
 
-function dwcav_term($file, $row, $value, $core_ids, $term){
+function dwcav_term($file, $rowType, $row, $value, $core_ids, $term){
   if(trim($value) == "" && $value != ""){
-    dwcav_error('warning', $file, "row $row - $term has no data but contains unwanted whitespace");
+    dwcav_error('warning', $file, "$term has no data but contains unwanted whitespace", $row);
+  }
+  global $freetext;
+  if (trim($value) == "" && array_key_exists($term, $freetext)){
+  	$level = $freetext[$term]['empty'];
+  	if ($level != "") {
+  	  dwcav_error($level, $file, "$term is empty", $row);
+  	}
   }
 }
 
@@ -307,7 +381,7 @@ function dwcav_xml_attributes($attributes, $file){
   );
   foreach($checks as $check){
     if(!isset($array[$check])){
-      dwcav_error('error', 'meta.xml', "$check not defined in core attributes");
+      dwcav_error('error', 'meta.xml', "$check not defined in core attributes", "");
     }else{
       //The attribute is present, we can proceed to validate it
       $function = 'dwcav_xml_attributes_' . $check;
@@ -327,7 +401,7 @@ function dwcav_xml_attributes($attributes, $file){
 function dwcav_archive($dir, $dir_list){ 
   //Verify that a meta.xml is present, if not it is impossible to verify the file
   if(!in_array('meta.xml', $dir_list)){
-    dwcav_error('fatal', 'archive', 'meta.xml is not present');
+    dwcav_error('fatal', 'archive', 'meta.xml is not present', "");
   }
   
   //Generate a list of files tthat should be checked for DwC-A compliance against meta.xml
@@ -339,16 +413,16 @@ function dwcav_archive($dir, $dir_list){
     }
     //Check is a normal file
     if(!is_file($dir . '/' . $file)){
-      dwcav_error('error', 'archive', "$file is not a file");
+      dwcav_error('error', 'archive', "$file is not a file", "");
       continue;
     }
     //Make sure it is not a directory
     if(is_dir($dir . '/' . $file)){
-      dwcav_error('error', 'archive', "$file is a directory - zip should not contain directories");
+      dwcav_error('error', 'archive', "$file is a directory - zip should not contain directories", "");
       continue;
     }
     if(substr($file, -4) != '.txt'){
-      dwcav_error('error', 'archive', "$file is not a text file or does not have .txt extension");
+      dwcav_error('error', 'archive', "$file is not a text file or does not have .txt extension", "");
       continue;
     }
     $ok_files[] = $file;
@@ -363,17 +437,46 @@ function dwcav_archive($dir, $dir_list){
  * $section indicates what file in the archive the error occurs with (or wehtehr the issue is with the archive itself)
  * $message is for a description of the error for the user
  */
-function dwcav_error($level, $section, $message){
-  print "[$section] ($level): $message\n";
+function dwcav_error($level, $section, $message, $row=''){
+  //print "[$section] ($level): $message\n";
   global $errors;
-  $errors[] = array(
-    $level,
-    $section,
-    $message
-  );
+    if (isset($errors[$section][$message]['rows'])) {
+      $errors[$section][$message]['rows'] .= ", $row";
+    } else {
+      $errors[$section][$message]['rows'] = $row;
+    }
+    $errors[$section][$message]['level'] = $level;
+  
   if ($level == 'fatal') {
-  	"The issue above prevents completion of the validation process.\n\n";
+  	dwcav_error_print();
+  	print "The issue above prevents completion of the validation process.\n\n";
   	exit;
+  }
+}
+
+function dwcav_error_print() {
+  global $errors;
+  print "\n\n\n";
+  $section_length = 0;
+  foreach($errors as $section => $data){
+  	if (strlen($section) > $section_length){
+  	  $section_length = strlen($section);
+  	}
+  }
+  
+  foreach ($errors as $section => $section_data){
+  	foreach ($section_data as $message => $data) {
+  	 $label = str_pad($section, $section_length+2, " ", STR_PAD_BOTH);
+  	 $level = str_pad($data['level'], strlen('warning')+2, " ", STR_PAD_BOTH);
+  	 print "[$label] ($level) $message ";
+  	 if ($data['rows'] != "") {
+  	 	print "(rows: ";
+  	 	print $data['rows'];
+  	 	print ")";
+  	 }
+  	  print "\n";
+  	}
+  	
   }
 }
 
@@ -386,7 +489,7 @@ function dwcav_openfile($file_name){
   if($is_open === TRUE){
     return $zip;
   }else{
-    dwcav_error('fatal', 'archive', "Could not open the archive.");
+    dwcav_error('fatal', 'archive', "Could not open the archive.", "");
   }
 }
 
@@ -396,14 +499,32 @@ function dwcav_openfile($file_name){
 function dwcav_extract(&$zip, $file_name){
   $tmp_path = sys_get_temp_dir() . '/dwca/';
   if ($zip->extractTo($tmp_path)) {
-    dwcav_error('debug', 'archive', "Files extarcted to $tmp_path");
+    dwcav_error('debug', 'archive', "Files extracted to $tmp_path", "");
     $zip->close();
   } else {
-  	dwcav_error('fatal', 'archive', "Could not extract files from archive");
+  	dwcav_error('fatal', 'archive', "Could not extract files from archive", "");
   }
   //extractTo creates a new subfolder for files - return path to that subfolder
   $dir_listing = scandir($tmp_path);
   return $tmp_path . $dir_listing[2] . "/";
+}
+
+/*
+ * Helper function to get list of all freetext fields
+ */
+function dwcav_terms_freetext() {
+  global $namespaces;
+  $return = array();
+  foreach ($namespaces as $namespace) {
+  	if ($namespace == 'dwcav') {
+  	  continue;
+  	}
+  	$function = $namespace."_terms_freetext";
+  	if (function_exists($function)) {
+  	  $return = array_merge($return, $function());
+  	}
+  }
+  return $return;
 }
 
 /*
@@ -441,5 +562,32 @@ function dwcav_terms_info() {
   }
   return $return;
 }
+
+function dwcav_terms_deprecated() {
+  global $namespaces;
+  $return = array();
+  foreach ($namespaces as $namespace) {
+  	if ($namespace == 'dwcav') {
+  	  continue;
+  	}
+  	$function = $namespace."_terms_deprecated";
+  	if (function_exists($function)) {
+  	  $return = array_merge($return, $function());
+  	}
+  }
+  return $return;
+}
+
+function dwcav_safe_term($term) {
+  $safe_term = substr((string)$term, 7);
+  $safe_term = str_replace('.', '_', $safe_term);
+  $safe_term = str_replace('/', '_', $safe_term);
+  $safe_term = str_replace('#', '_', $safe_term);
+  return $safe_term;
+}
+
+
+
+dwcav_error_print();
 
 print "\n";
