@@ -40,6 +40,11 @@ if (isset($argv[2])) {
 	}
 }
 
+global $_GET;
+if (isset($_GET['url'])) {
+  $archive_path = $_GET['url'];
+}
+
 //Open and extract the archive
 $dir = dwcav_extract(dwcav_openfile($archive_path), $archive_path);
 
