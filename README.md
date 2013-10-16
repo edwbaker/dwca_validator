@@ -25,5 +25,8 @@ If you add fields that do not link to the index of the core file they will throw
 *hook_terms_info()
 Use this to specify instances where you need to two or more fields from the same row to properly validate the file. Return an array of the URIs of the fields you need, keyed by the rowType URI. 
 
-*hook_term_[safe name of term uri]($file, $row, $value, &$core_ids, [&$identifiers])
+*hook_term_[safe name of term uri]($file, $row, $rowType, $value, &$core_ids, [&$identifiers])
 Use this to validate content against a specific uri (column identifier) specified in the meta.xml. To create the safe name remove the initial http:// and replace all / and . with _. $file and $row specify what file you are validating, mainly useful for generating an error message using dwcav_error(). $value is the value you should be validating. $core_ids is used if you need to verify that a value occurs in the core index, $identifiers can be used to check the identifiers used in other files. There is no return.
+
+*hook_terms_freetext()
+Indicate to the validator that the term URIs returned do not need validation. Optionally can indicate that they must be non-empty.
