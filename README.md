@@ -2,7 +2,7 @@ dwca_validator
 ==============
 
 Darwin Core Archive validator
-
+by Ed Baker
 
 
 Extending the tool
