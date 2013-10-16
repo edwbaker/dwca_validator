@@ -30,6 +30,7 @@ $field_uris = array();
 $freetext = dwcav_terms_freetext();
 $print_info = FALSE;
 $web = FALSE;
+$multi_terms = array();
 
 
 //Takes path to archive as a single argument from the command line
@@ -87,6 +88,7 @@ function dwcav_load_plugins() {
  */
 function dwcav_meta_xml($dir, $ok_files){
   global $freetext;
+  global $namespaces;
   //We need to be able to parse the meta file
   $meta = file_get_contents("$dir/meta.xml");
   $meta_xml = new SimpleXMLElement($meta);
@@ -151,7 +153,11 @@ function dwcav_meta_xml($dir, $ok_files){
   foreach ($meta_xml->extension as $extension) {
     //Which column (if any) links to the core file
   	$core_id_column = (array)$extension->coreid->attributes();
-    $core_id_column = $core_id_column['@attributes']['index'];
+  	if (isset($core_id_column['@attributes']['index'])) {
+      $core_id_column = $core_id_column['@attributes']['index'];
+  	} else {
+  	  $core_id_column = NULL;
+  	}
     $meta_columns = array();
     $id_column = FALSE;
     foreach($extension->field as $field){
@@ -182,7 +188,10 @@ function dwcav_meta_xml($dir, $ok_files){
     $row = 1; //used to provide a row number to the user
     $handle = fopen($rowProperties['file_path'], "r");
     if($handle !== FALSE){
-      while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'], $rowProperties['field_enclosed'])) !== FALSE){
+    	if ($rowProperties['field_terminated'] = '\t') {
+    	  $rowProperties['field_terminated'] = "\t";
+    	}
+      while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated']/*, $rowProperties['field_enclosed']*/)) !== FALSE){
         //The core file has slightly different requirements
         if ($rowProperties['is_core'] === TRUE) {
           //Check for duplicate core identifiers     	       
@@ -210,11 +219,13 @@ function dwcav_meta_xml($dir, $ok_files){
           	  break;
           	}
           }
+          if (!is_null($rowProperties['core_id_column'])) {
           if (trim($data[$rowProperties['core_id_column']]) != "" && !array_key_exists($data[$rowProperties['core_id_column']], $identifiers[$core_type]['ids'])) {
             //Some files are expected to break this rule, even if it is not strictly valid
           	if(!in_array($rowType, dwcav_exclusions_files_core_index())) {
           	  dwcav_error('error', $rowProperties['file_name'], "identifier not in core file", $row);
           	}
+          }
           }
           //Duplicate IDs in extensions isn't so bad - but give an info just in case
           if(array_key_exists($data[$rowProperties['id_column']], $rowProperties['ids'])){
@@ -250,60 +261,8 @@ function dwcav_meta_xml($dir, $ok_files){
   
   //As we use rowTypes from the meta.xml here it is possible that we will parse a single file multiple times
   global $field_uris;
-  foreach($identifiers as $rowType => &$rowProperties){
-    $handle = fopen($rowProperties['file_path'], "r");
-    $row = 1;
-    if($handle !== FALSE){
-    	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'], $rowProperties['field_enclosed'])) !== FALSE){
-        foreach($rowProperties['columns'] as $index => $term){
-          if (!array_key_exists($term, $field_uris)) {
-          	$field_uris[$term] = array();
-          }
-          //Start with a generic check - this also performs validation on freetext
-          //print $data[$index]."\n";
-          dwcav_term($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $term);
-          
-          //$safe_term turns a term URI into a string suitable as a name for a PHP function
-          $safe_term = dwcav_safe_term($term);
-          
-          //Check whether any function provides further validation
-          global $namespaces;
-          foreach ($namespaces as $namespace) {
-            $function = $namespace.'_term_' . $safe_term;
-            if(function_exists($function)){
-              $function($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $identifiers);
-            }
-          }
-          
-          
-          //check for multi-field checks
-          foreach($multi_terms as $function => $terms){
-            $params = array();
-            //Only check the first term - no need to run this multiple times
-            if($terms[0] == $term){
-              foreach($terms as $m_term){
-                foreach($rowProperties['columns'] as $meta_index => $meta_term){
-                  if($m_term == $meta_term){
-                    $params[$m_term] = $data[$meta_index];
-                  }
-                }
-              }
-            }
-            //check we have all the data we need, then run the check
-            if(sizeof($terms) == sizeof($params)){
-              $function($rowProperties['file_name'], $row, $params);
-            }
-          }
-        }
-        $row++;
-      }
-    }else{
-      dwcav_error('error', $rowProperties['file_name'], "Could not open file", "");
-    }
-    fclose($handle);
-    
+  dwcav_row_iterate($identifiers);
 
-  }
   //are there files not listed in the meta file?
   foreach($ok_files as $ok_file){
     if(!in_array($ok_file, $present_files)){
@@ -355,6 +314,82 @@ function dwcav_meta_xml($dir, $ok_files){
 
   
   return $core_file;
+}
+
+function dwcav_row_iterate(&$identifiers) {
+  foreach($identifiers as $rowType => &$rowProperties){
+    $handle = fopen($rowProperties['file_path'], "r");
+    $row = 1;
+    if($handle !== FALSE){
+      if ($rowProperties['field_terminated'] == "\t" ) {
+      	dwcav_row_iterate_tsv($handle, $rowType, $rowProperties, $row, $identifiers);
+      } else {
+        dwcav_row_iterate_csv($handle, $rowType, $rowProperties, $row, $identifiers);
+      }
+    }else{
+      dwcav_error('error', $rowProperties['file_name'], "Could not open file", "");
+    }
+    fclose($handle);
+  }
+}
+
+function dwcav_row_iterate_tsv(&$handle, $rowType, &$rowProperties, $row, &$identifiers) {
+    	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'])) !== FALSE){
+		  dwcav_row_iterate_do($data, $rowType, $rowProperties, $row, $identifiers);
+        $row++;
+      }
+}
+
+function dwcav_row_iterate_csv(&$handle, $rowType, &$rowProperties, $row, &$identifiers) {
+    	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'], $rowProperties['field_enclosed'])) !== FALSE){
+		  dwcav_row_iterate_do($data, $rowType, $rowProperties, $row, $identifiers);
+        $row++;
+      }
+}
+
+function dwcav_row_iterate_do(&$data, $rowType, &$rowProperties, $row, &$identifiers) {
+		 global $multi_terms;
+  global $field_uris;
+        foreach($rowProperties['columns'] as $index => $term){
+          if (!array_key_exists($term, $field_uris)) {
+          	$field_uris[$term] = array();
+          }
+          //Start with a generic check - this also performs validation on freetext
+          //print $data[$index]."\n";
+          dwcav_term($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $term);
+          
+          //$safe_term turns a term URI into a string suitable as a name for a PHP function
+          $safe_term = dwcav_safe_term($term);
+          
+          //Check whether any function provides further validation
+          global $namespaces;
+          foreach ($namespaces as $namespace) {
+            $function = $namespace.'_term_' . $safe_term;
+            if(function_exists($function)){
+              $function($rowProperties['file_name'], $rowType, $row, $data[$index], $rowProperties['ids'], $identifiers);
+            }
+          }
+          
+          
+          //check for multi-field checks
+          foreach($multi_terms as $function => $terms){
+            $params = array();
+            //Only check the first term - no need to run this multiple times
+            if($terms[0] == $term){
+              foreach($terms as $m_term){
+                foreach($rowProperties['columns'] as $meta_index => $meta_term){
+                  if($m_term == $meta_term){
+                    $params[$m_term] = $data[$meta_index];
+                  }
+                }
+              }
+            }
+            //check we have all the data we need, then run the check
+            if(sizeof($terms) == sizeof($params)){
+              $function($rowProperties['file_name'], $row, $params);
+            }
+          }
+        }
 }
 
 function dwcav_term($file, $rowType, $row, $value, $core_ids, $term){
