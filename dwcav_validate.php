@@ -129,6 +129,7 @@ function dwcav_meta_xml($dir, $ok_files){
     'file_name' => (string)$meta_xml->core->files->location,
     'field_terminated' => (string)$meta_xml->core->attributes()->fieldsTerminatedBy,
     'field_enclosed' => (string)$meta_xml->core->attributes()->fieldsEnclosedBy,
+    'header_rows' => (int)$meta_xml->core->attributes()->ignoreHeaderLines,
     'num_columns' => count($meta_columns),
     'core_id_column' => $id_column,
     'columns' => $meta_columns,
@@ -175,6 +176,7 @@ function dwcav_meta_xml($dir, $ok_files){
   	  'file_name' => (string)$extension->files->location,
   	  'field_terminated' => (string)$extension->attributes()->fieldsTerminatedBy,
   	  'field_enclosed' => (string)$extension->attributes()->fieldsEnclosedBy,
+  	    'header_rows' => (int)$meta_xml->core->attributes()->ignoreHeaderLines,
   	  'num_columns' => count($meta_columns),
   	  'core_id_column' => $core_id_column,
   	  'id_column' => $id_column,
@@ -185,13 +187,17 @@ function dwcav_meta_xml($dir, $ok_files){
   
   //Iterate over each row in every rowType to validate identifiers
   foreach($identifiers as $rowType => &$rowProperties){
-    $row = 1; //used to provide a row number to the user
+    $row = 0; //used to provide a row number to the user
     $handle = fopen($rowProperties['file_path'], "r");
     if($handle !== FALSE){
-    	if ($rowProperties['field_terminated'] = '\t') {
+    	if ($rowProperties['field_terminated'] == '\t') {
     	  $rowProperties['field_terminated'] = "\t";
     	}
       while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated']/*, $rowProperties['field_enclosed']*/)) !== FALSE){
+      	$row++;
+      	if ($row <= $identifiers[$rowType]['header_rows']) {
+      		continue;
+      	}
         //The core file has slightly different requirements
         if ($rowProperties['is_core'] === TRUE) {
           //Check for duplicate core identifiers     	       
@@ -245,7 +251,6 @@ function dwcav_meta_xml($dir, $ok_files){
           
           }
         }
-        $row++;
       }
     } else {
       dwcav_error('error', $rowProperties['file_name'], "Could not open file", "");
@@ -319,7 +324,7 @@ function dwcav_meta_xml($dir, $ok_files){
 function dwcav_row_iterate(&$identifiers) {
   foreach($identifiers as $rowType => &$rowProperties){
     $handle = fopen($rowProperties['file_path'], "r");
-    $row = 1;
+    $row = 0;
     if($handle !== FALSE){
       if ($rowProperties['field_terminated'] == "\t" ) {
       	dwcav_row_iterate_tsv($handle, $rowType, $rowProperties, $row, $identifiers);
@@ -336,20 +341,22 @@ function dwcav_row_iterate(&$identifiers) {
 function dwcav_row_iterate_tsv(&$handle, $rowType, &$rowProperties, $row, &$identifiers) {
     	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'])) !== FALSE){
 		  dwcav_row_iterate_do($data, $rowType, $rowProperties, $row, $identifiers);
-        $row++;
       }
 }
 
 function dwcav_row_iterate_csv(&$handle, $rowType, &$rowProperties, $row, &$identifiers) {
     	while(($data = fgetcsv($handle, 0, $rowProperties['field_terminated'], $rowProperties['field_enclosed'])) !== FALSE){
 		  dwcav_row_iterate_do($data, $rowType, $rowProperties, $row, $identifiers);
-        $row++;
       }
 }
 
-function dwcav_row_iterate_do(&$data, $rowType, &$rowProperties, $row, &$identifiers) {
-		 global $multi_terms;
+function dwcav_row_iterate_do(&$data, $rowType, &$rowProperties, &$row, &$identifiers) {
+  $row++;
+  global $multi_terms;
   global $field_uris;
+  if ($row <= $identifiers[$rowType]['header_rows']) {
+  	return;
+  }
         foreach($rowProperties['columns'] as $index => $term){
           if (!array_key_exists($term, $field_uris)) {
           	$field_uris[$term] = array();
